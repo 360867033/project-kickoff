@@ -4,20 +4,14 @@
 
 ## 安装
 
-将本仓库中的技能文件放入 Codex 技能目录：
+将本仓库放入 Codex 技能目录：
 
 ```powershell
 $target = Join-Path $HOME '.codex\skills\project-kickoff'
-New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-Copy-Item -LiteralPath '.\project-kickoff' -Destination (Split-Path -Parent $target) -Recurse -Force
+git clone https://github.com/360867033/project-kickoff.git $target
 ```
 
-仓库同时提供根目录与 `project-kickoff/` 两种布局：
-
-- 下载完整仓库并安装时，复制 `project-kickoff/` 子目录。
-- 将本仓库直接放在 `~/.codex/skills/project-kickoff` 时，根目录的 `SKILL.md` 即可被 Codex 读取。
-
-根目录的 `SKILL.md` 与子目录中的文件由同一份 v0.9.2 技能同步生成，校验时逐文件比对 SHA256。
+仓库根目录就是 Codex 技能目录，根目录的 `SKILL.md` 会被 Codex 读取。安装后重启 Codex 或刷新技能列表，使新技能生效。
 
 ## 功能
 
@@ -30,15 +24,15 @@ Copy-Item -LiteralPath '.\project-kickoff' -Destination (Split-Path -Parent $tar
 ## 快速使用
 
 ```powershell
-python .\project-kickoff\scripts\init_workspace.py 'C:\path\to\project' --name '项目名' --goal '项目目标'
-python .\project-kickoff\scripts\init_workspace.py 'C:\path\to\project' --name '项目名' --goal '项目目标' --apply
-python .\project-kickoff\scripts\doctor.py 'C:\path\to\project' --json
+python "$HOME\.codex\skills\project-kickoff\scripts\init_workspace.py" 'C:\path\to\project' --name '项目名' --goal '项目目标'
+python "$HOME\.codex\skills\project-kickoff\scripts\init_workspace.py" 'C:\path\to\project' --name '项目名' --goal '项目目标' --apply
+python "$HOME\.codex\skills\project-kickoff\scripts\doctor.py" 'C:\path\to\project' --json
 ```
 
 ## 验证
 
 ```powershell
-python -m unittest project-kickoff\scripts\test_smoke -v
+python -m unittest discover -s "$HOME\.codex\skills\project-kickoff\scripts" -p 'test_*.py' -v
 ```
 
 版本记录见 `CHANGELOG.md`。
