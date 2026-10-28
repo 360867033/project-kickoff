@@ -508,6 +508,23 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(snapshot(self.root), before)
         self.assertFalse((self.root / ".project").exists())
 
+    def test_project_skill_storage_contract_is_available_from_project(self):
+        meta = self.initialize()
+        project = (meta / "PROJECT.md").read_text(encoding="utf-8")
+        self.assertIn("`.project/skill/<技能名>/SKILL.md`", project)
+        self.assertIn("技能自带的 scripts/、references/、assets/", project)
+        self.assertIn("不代表运行环境会自动发现或加载", project)
+        self.assertFalse((meta / "skill").exists())
+
+    def test_existing_project_skill_is_preserved_on_refresh(self):
+        skill = self.put(".project/skill/report-review/SKILL.md", "# 项目审核技能\n已有规则。\n")
+        helper = self.put(".project/skill/report-review/scripts/check.py", "print('existing')\n")
+        before = {p: p.read_bytes() for p in (skill, helper)}
+        self.initialize("--force", "--force-data")
+        self.initialize("--force", "--force-data")
+        self.assertEqual({p: p.read_bytes() for p in before}, before)
+        self.assertEqual(list(skill.parent.rglob("*.bak_*")), [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

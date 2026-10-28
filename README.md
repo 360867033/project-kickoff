@@ -18,7 +18,8 @@ git clone https://github.com/360867033/project-kickoff.git $target
 - 初始化根目录 `AGENTS.md` 的受标记区块，不覆盖原文件其他指令。
 - 创建 `.project/PROJECT.md`、`.project/MAP.md`、`.project/CHANGELOG.md` 和 `.project/scripts/_version.py`。
 - 项目目标、阶段与完成条件写入 PROJECT；文件上下游关系写入 MAP；变更写入 CHANGELOG。AGENTS 仅作简短导航。
-- 脚本统一存放在 `.project/scripts/`。正式交付产物使用 `名称_v主.次_YYYYMMDD.ext`，版本管理为必用项。
+- 项目级技能存放在 `.project/skill/<技能名>/`，以 `SKILL.md` 为入口，技能自带资源随技能保存；按需创建，实际加载入口按运行环境配置。
+- 独立项目脚本统一存放在 `.project/scripts/`。正式交付产物使用 `名称_v主.次_YYYYMMDD.ext`，版本管理为必用项。
 - 默认只预览，使用 `--apply` 才写入。支持备份、幂等刷新、只读索引巡检及产物版本登记。
 
 ## 快速使用

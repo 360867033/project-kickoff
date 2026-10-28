@@ -16,7 +16,7 @@ AGENTS_END = "<!-- project-kickoff:end -->"
 def build_documents(root: Path, meta: Path, name: str, goal: str) -> dict[str, str]:
     prefix = meta.relative_to(root).as_posix()
     versioning_note = (
-        "必用：所有项目脚本统一存放在 `.project/scripts/`。正式交付产物采用 名称_v主.次_YYYYMMDD.ext，使用同目录的 `_version.py` 管理版本，生成并验证后登记到 MAP 和 CHANGELOG；代码、配置、外来原件和必须固定文件名的产物沿用项目规则。"
+        "必用：所有项目脚本统一存放在 `.project/scripts/`；技能自带脚本保留在各自技能目录内。正式交付产物采用 名称_v主.次_YYYYMMDD.ext，使用 `.project/scripts/_version.py` 管理版本，生成并验证后登记到 MAP 和 CHANGELOG；代码、配置、外来原件和必须固定文件名的产物沿用项目规则。"
     )
     # Include the instruction file that this plan will create, before writing MAP.
     files = sorted(set(iter_files(root)) | {"AGENTS.md"})
@@ -48,6 +48,12 @@ def build_documents(root: Path, meta: Path, name: str, goal: str) -> dict[str, s
 ## 当前阶段
 
 待根据实际任务核实。
+
+## 项目级技能
+
+项目级技能统一存放在 `.project/skill/<技能名>/`，入口为 `.project/skill/<技能名>/SKILL.md`。技能自带的 scripts/、references/、assets/ 等资源保留在该技能目录内，新增技能时按需创建；初始化不创建空技能或复制 project-kickoff。
+
+此位置是项目存放约定，不代表运行环境会自动发现或加载；使用时读取对应 SKILL.md，并在此记录实际运行环境的加载入口。已有技能迁移需在用户授权范围内核对引用与加载入口、备份并更新相关登记；个人或全局技能沿用原安装位置。
 
 ## 产物版本管理
 
