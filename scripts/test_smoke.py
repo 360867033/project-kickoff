@@ -1,8 +1,7 @@
-"""Behavioral regressions using isolated temporary projects; no installed skill mutation."""
+"""Isolated project behavior tests; no installed skill or real project mutation."""
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import subprocess
 import sys
@@ -13,10 +12,10 @@ from unittest.mock import patch
 
 SKILL = Path(__file__).resolve().parent.parent
 INIT = SKILL / "scripts" / "init_workspace.py"
-DOCTOR = SKILL / "scripts" / "doctor.py"
 sys.path.insert(0, str(SKILL / "scripts"))
-import doctor
+sys.path.insert(0, str(SKILL / "assets"))
 import init_workspace
+import workspace_common
 import _version as V
 
 
@@ -46,11 +45,8 @@ class WorkspaceTests(unittest.TestCase):
         return p
 
     def initialize(self, *args):
-        self.run_cli(INIT, self.root, "--apply", "--with-map", *args)
+        self.run_cli(INIT, self.root, "--apply", *args)
         return self.root / ".project"
-
-    def findings(self, *args, expected=0):
-        return json.loads(self.run_cli(DOCTOR, self.root, "--json", *args, expected=expected).stdout)
 
     def version(self):
         meta = self.initialize()
@@ -59,7 +55,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_preview_does_not_write(self):
         self.put("business/业务脚本.py")
         before = snapshot(self.root)
-        self.run_cli(INIT, self.root, "--force", "--force-data")
+        self.run_cli(INIT, self.root, "--force")
         self.assertEqual(snapshot(self.root), before)
         self.assertFalse((self.root / ".project").exists())
 
@@ -68,7 +64,7 @@ class WorkspaceTests(unittest.TestCase):
         before = {p: self.put(p).read_bytes() for p in paths}
         meta = self.initialize()
         self.assertEqual({p.name for p in meta.iterdir()},
-                         {"PROJECT.md", "MAP.md", "PROGRESS.md", "scripts"})
+                         {"PROJECT.md", "PROGRESS.md", "scripts"})
         for p, data in before.items():
             actual = (self.root / p).read_bytes()
             if p == "AGENTS.md":
@@ -78,137 +74,6 @@ class WorkspaceTests(unittest.TestCase):
             else:
                 self.assertEqual(actual, data)
         self.assertTrue((meta / "scripts/_version.py").is_file())
-        self.assertEqual(self.findings()["naming_hint"], [])
-
-    def test_no_index_is_not_failure(self):
-        self.put("普通文件.txt")
-        before = snapshot(self.root)
-        self.assertTrue(self.findings()["notes"])
-        self.assertEqual(snapshot(self.root), before)
-
-    def test_root_map_is_not_used_by_doctor(self):
-        self.put("MAP.md", "- 输入：`不存在.txt`\n")
-        before = snapshot(self.root)
-        self.assertTrue(self.findings()["notes"])
-        self.assertFalse(self.findings()["map_missing_file"])
-        self.run_cli(INIT, self.root, "--apply", expected=2)
-        self.assertEqual(snapshot(self.root), before)
-        self.assertFalse((self.root / ".project").exists())
-
-    def test_existing_project_without_map_is_not_failure(self):
-        self.put("PROJECT.md", "已有项目说明")
-        before = snapshot(self.root)
-        self.assertTrue(self.findings()["notes"])
-        self.assertEqual(snapshot(self.root), before)
-
-    def test_root_readme_registration_is_checked(self):
-        self.initialize()
-        self.put(".project/MAP.md", "- 输入：`README.md`\n")
-        self.assertEqual(self.findings(expected=1)["map_missing_file"], ["README.md"])
-
-    def test_default_does_not_walk_project(self):
-        meta = self.initialize()
-        with patch.object(doctor, "iter_files", side_effect=AssertionError("recursive walk")):
-            self.assertFalse(any(doctor.check(self.root, meta).values()))
-
-    def test_read_only_with_stale_registration(self):
-        self.initialize()
-        self.put(".project/MAP.md", "- 输入：`不存在.xlsx`\n")
-        before = snapshot(self.root)
-        self.assertEqual(self.findings(expected=1)["map_missing_file"], ["不存在.xlsx"])
-        self.assertEqual(snapshot(self.root), before)
-
-    def test_coverage_optional_and_directory_boundaries(self):
-        self.initialize()
-        for p in ["node_modules/a.js", ".git/a", ".codex/a", ".agents/a", "node_modules备份/a.txt",
-                  "venv-分析/a.txt", "venv说明.txt", ".github/workflows/job.yml", "business/main.py"]:
-            self.put(p)
-        self.assertFalse(self.findings()["map_unregistered"])
-        f = self.findings("--check-coverage")["map_unregistered"]
-        for p in ["node_modules备份/a.txt", "venv-分析/a.txt", "venv说明.txt", ".github/workflows/job.yml", "business/main.py"]:
-            self.assertIn(p, f)
-        self.assertFalse(any(p.startswith(("node_modules/", ".git/", ".codex/", ".agents/")) for p in f))
-
-    def test_same_basename_does_not_cover_other_directory(self):
-        self.initialize()
-        self.put("甲/数据.xlsx")
-        self.put("乙/数据.xlsx")
-        self.put(".project/MAP.md", "- 输入：`甲/数据.xlsx`\n")
-        self.assertIn("乙/数据.xlsx", self.findings("--check-coverage")["map_unregistered"])
-
-    def test_directory_registration_and_ghost_mentions(self):
-        self.initialize()
-        self.put("4. 数据/1. 采集表/a.xlsx")
-        self.put("根文件.txt")
-        self.put(".project/MAP.md", """# MAP
-- 输入：`4. 数据/1. 采集表/`
-  - `根文件.txt`
-- 参考：`AGENTS.md`
-
-正文：`幽灵.txt`
-| 项目 | `幽灵.txt` |
-```text
-- 输入：`幽灵.txt`
-```
-~~~text
-- 输出：`幽灵.txt`
-~~~
-""")
-        self.assertFalse(any(self.findings("--check-coverage").values()))
-
-    def test_initial_list_and_placeholders(self):
-        self.initialize()
-        self.put("已存在.txt")
-        self.put(".project/MAP.md", "## 初扫文件清单\n### 根目录\n- `已存在.txt`\n- `AGENTS.md`\n"
-                 "## 环节\n- 输出：`数据/<编号>.json`\n- 输入：`数据/*.json`\n")
-        f = self.findings("--check-coverage")
-        self.assertEqual(f["map_unregistered"], [])
-        self.assertEqual(len(f["map_syntax_hint"]), 2)
-
-    def test_index_path_escape_rejected(self):
-        self.initialize()
-        self.put(".project/MAP.md", "- 输入：`../外部.txt`\n")
-        self.assertTrue(self.findings(expected=1)["map_invalid_path"])
-
-    def test_naming_is_opt_in_and_nonblocking(self):
-        self.put("报告/原件副本(1).xlsx")
-        self.put("报告/总报告_v1.0_20261019.docx")
-        self.put("报告/总报告_v1.2_20261019.docx")
-        self.initialize()
-        self.assertFalse(self.findings()["naming_hint"])
-        f = self.findings("--versioned-dir", "报告")
-        self.assertIn("报告/原件副本(1).xlsx", f["naming_hint"])
-        self.assertEqual(len(f["version_gap"]), 1)
-
-    def test_idempotence_and_unique_backups(self):
-        meta = self.initialize()
-        before = snapshot(self.root)
-        self.initialize()
-        self.assertEqual(snapshot(self.root), before)
-        for iteration in range(2):
-            for name in ("PROJECT.md", "MAP.md", "PROGRESS.md"):
-                self.put(f".project/{name}", f"important {iteration}")
-            self.initialize("--force", "--force-data")
-        self.assertEqual(len(list(meta.glob("*.bak_*"))), 4)
-        self.assertEqual((meta / "PROGRESS.md").read_text(encoding="utf-8"), "important 1")
-        self.assertEqual({p.read_text(encoding="utf-8") for p in meta.glob("MAP.md.bak_*")},
-                         {"important 0", "important 1"})
-
-    def test_force_preserves_accumulated_data(self):
-        self.initialize()
-        self.put(".project/MAP.md", "handwritten index")
-        self.put(".project/PROGRESS.md", "valuable history")
-        self.initialize("--force")
-        self.assertEqual((self.root / ".project/MAP.md").read_text(encoding="utf-8"), "handwritten index")
-        self.assertEqual((self.root / ".project/PROGRESS.md").read_text(encoding="utf-8"), "valuable history")
-
-    def test_initial_list_truncation_is_visible(self):
-        for i in range(105):
-            self.put(f"数据/{i:03}.txt")
-        meta = self.initialize()
-        text = (meta / "MAP.md").read_text(encoding="utf-8")
-        self.assertIn("共 106 个", text)
-        self.assertEqual(len(self.findings("--check-coverage")["map_unregistered"]), 6)
 
     def test_version_new_default_is_read_only(self):
         ver = self.version()
@@ -229,70 +94,6 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn("v1.1", self.run_cli(ver, "latest", "--dir", "报告", "--name", "总报告").stdout)
         cl = (self.root / ".project/PROGRESS.md").read_text(encoding="utf-8")
         self.assertIn("2026-10-19", cl)
-        before = snapshot(self.root)
-        self.assertEqual(snapshot(self.root), before)
-        self.assertFalse(any(self.findings().values()))
-
-    def test_register_does_not_duplicate_initial_snapshot(self):
-        relative = "报告/总报告_v1.0_20261019.docx"
-        self.put(relative)
-        ver = self.version()
-        mp = self.root / ".project/MAP.md"
-        before = mp.read_bytes()
-        self.run_cli(ver, "register", relative)
-        self.assertEqual(mp.read_bytes(), before)
-        self.assertIn(relative, (self.root / ".project/PROGRESS.md").read_text(encoding="utf-8"))
-
-    def test_register_recognizes_fields_nested_paths_and_directories(self):
-        ver = self.version()
-        relative = "报告/总报告_v1.0_20261019.docx"
-        self.put(relative)
-        for registration in (f"- 输出：`{relative}`", f"- 【登记】`./{relative}`",
-                             f"- 输出：\n  - `{relative}`", "- 输出：`报告/`"):
-            with self.subTest(registration=registration):
-                mp = self.put(".project/MAP.md", "# MAP\n\n" + registration + "\n")
-                before = mp.read_bytes()
-                self.run_cli(ver, "register", relative)
-                self.assertEqual(mp.read_bytes(), before)
-
-    def test_register_ignores_ghost_mentions_when_deduplicating(self):
-        ver = self.version()
-        relative = "报告/总报告_v1.0_20261019.docx"
-        self.put(relative)
-        mp = self.put(".project/MAP.md", f"# MAP\n\n正文：`{relative}`\n"
-                      f"| 文件 | `{relative}` |\n\n```markdown\n- 输出：`{relative}`\n```\n")
-        self.run_cli(ver, "register", relative)
-        registered, _ = doctor.collect_registered(mp)
-        self.assertEqual(registered, [relative])
-        before = snapshot(self.root)
-        self.run_cli(ver, "register", relative)
-        self.assertEqual(snapshot(self.root), before)
-
-    def test_map_reorganization_does_not_repeat_history(self):
-        ver = self.version()
-        relative = "报告/总报告_v1.0_20261019.docx"
-        self.put(relative)
-        self.run_cli(ver, "register", relative, "--note", "初稿")
-        cl = self.root / ".project/PROGRESS.md"
-        history = cl.read_bytes()
-        self.put(".project/MAP.md", f"# MAP\n\n## 环节\n- 输出：`{relative}`\n")
-        before = snapshot(self.root)
-        self.run_cli(ver, "register", relative, "--note", "初稿")
-        self.assertEqual(snapshot(self.root), before)
-        self.put(".project/MAP.md", "# MAP\n")
-        self.run_cli(ver, "register", relative)
-        self.assertEqual(cl.read_bytes(), history)
-        self.assertIn(relative, doctor.collect_registered(self.root / ".project/MAP.md")[0])
-
-    def test_map_registration_does_not_suppress_missing_history(self):
-        ver = self.version()
-        relative = "报告/总报告_v1.0_20261019.docx"
-        self.put(relative)
-        mp = self.put(".project/MAP.md", f"# MAP\n- 产物登记：`{relative}`\n")
-        before = mp.read_bytes()
-        self.run_cli(ver, "register", relative)
-        self.assertEqual(mp.read_bytes(), before)
-        self.assertIn(relative, (self.root / ".project/PROGRESS.md").read_text(encoding="utf-8"))
 
     def test_distinct_artifacts_keep_identity_and_file_versions(self):
         ver = self.version()
@@ -348,16 +149,14 @@ class WorkspaceTests(unittest.TestCase):
         self.put("数据/输入.xlsx")
         meta = self.initialize("--name", "测试项目", "--goal", "编制年度报告")
         agents = (self.root / "AGENTS.md").read_text(encoding="utf-8")
-        for item in (".project/PROJECT.md", ".project/MAP.md", ".project/PROGRESS.md"):
+        for item in (".project/PROJECT.md", ".project/PROGRESS.md"):
             self.assertIn(item, agents)
         for item in ("测试项目", "编制年度报告", "数据/"):
             self.assertNotIn(item, agents)
         project = (meta / "PROJECT.md").read_text(encoding="utf-8")
         self.assertIn("测试项目", project)
         self.assertIn("编制年度报告", project)
-        self.assertIn("数据/输入.xlsx", (meta / "MAP.md").read_text(encoding="utf-8"))
         self.assertFalse((meta / "README.md").exists())
-        self.assertFalse(any(self.findings("--check-coverage").values()))
 
     def test_agents_update_preserves_surrounding_bytes(self):
         self.initialize()
@@ -456,16 +255,6 @@ class WorkspaceTests(unittest.TestCase):
                 self.run_cli(INIT, self.root, "--apply", flag, expected=2)
                 self.assertEqual(snapshot(self.root), before)
 
-    def test_project_scripts_use_single_location(self):
-        meta = self.initialize()
-        project = (meta / "PROJECT.md").read_text(encoding="utf-8")
-        agents = (self.root / "AGENTS.md").read_text(encoding="utf-8")
-        maplist = (meta / "MAP.md").read_text(encoding="utf-8")
-        self.assertIn("所有项目脚本统一存放在 `.project/scripts/`", project)
-        self.assertNotIn("项目脚本统一存放在 `.project/scripts/`", agents)
-        self.assertNotIn("项目脚本统一存放在 `.project/scripts/`", maplist)
-        self.assertNotIn("- 脚本：`scripts/", maplist)
-
     def test_mandatory_versioning_preview_does_not_write(self):
         self.put("原件.txt")
         before = snapshot(self.root)
@@ -486,29 +275,10 @@ class WorkspaceTests(unittest.TestCase):
         skill = self.put(".project/skill/report-review/SKILL.md", "# 项目审核技能\n已有规则。\n")
         helper = self.put(".project/skill/report-review/scripts/check.py", "print('existing')\n")
         before = {p: p.read_bytes() for p in (skill, helper)}
-        self.initialize("--force", "--force-data")
-        self.initialize("--force", "--force-data")
+        self.initialize("--force")
+        self.initialize("--force")
         self.assertEqual({p: p.read_bytes() for p in before}, before)
         self.assertEqual(list(skill.parent.rglob("*.bak_*")), [])
-
-
-    def test_default_initialization_has_no_index_or_walk(self):
-        with patch.object(init_workspace, "iter_files", side_effect=AssertionError("recursive walk")):
-            documents = init_workspace.build_documents(self.root, self.root / ".project", "项目", "目标")
-        self.assertNotIn("MAP.md", documents)
-        self.put("数据/输入.txt")
-        self.run_cli(INIT, self.root, "--apply")
-        meta = self.root / ".project"
-        self.assertEqual({p.name for p in meta.iterdir()}, {"PROJECT.md", "PROGRESS.md", "scripts"})
-        self.assertFalse((meta / "CHANGELOG.md").exists())
-        before = snapshot(self.root)
-        self.run_cli(INIT, self.root, "--apply", "--force-data")
-        self.assertEqual(snapshot(self.root), before)
-
-    def test_existing_map_preserved_without_scanning(self):
-        self.put(".project/MAP.md", "handwritten index")
-        self.run_cli(INIT, self.root, "--apply", "--force-data")
-        self.assertEqual((self.root / ".project/MAP.md").read_text(encoding="utf-8"), "handwritten index")
 
     def test_register_without_map_preserves_current_progress(self):
         self.run_cli(INIT, self.root, "--apply")
@@ -535,18 +305,9 @@ class WorkspaceTests(unittest.TestCase):
         self.assertTrue(progress.read_bytes().startswith(current))
         self.assertNotIn(b"\n", progress.read_bytes().replace(b"\r\n", b""))
 
-    def test_invalid_optional_map_encoding_does_not_log(self):
-        ver = self.version()
-        self.put(".project/MAP.md").write_bytes(b"\xff\xfeinvalid")
-        relative = "报告/报告_v1.0_20261102.txt"
-        self.put(relative)
-        before = snapshot(self.root)
-        self.run_cli(ver, "register", relative, expected=1)
-        self.assertEqual(snapshot(self.root), before)
-
     def test_legacy_requires_explicit_migration_before_any_write(self):
         self.put(".project/CHANGELOG.md", "# 旧记录\n## 未发布\n旧历史\n")
-        for args in ((), ("--apply",), ("--apply", "--force", "--force-data")):
+        for args in ((), ("--apply",), ("--apply", "--force")):
             before = snapshot(self.root)
             result = self.run_cli(INIT, self.root, *args, expected=2)
             self.assertIn("--migrate-changelog", result.stderr)
@@ -619,22 +380,6 @@ class WorkspaceTests(unittest.TestCase):
         self.run_cli(INIT, self.root, "--apply", "--migrate-changelog", expected=2)
         self.assertEqual(snapshot(self.root), before)
 
-    def test_register_blocks_legacy_and_invalid_optional_map_before_writes(self):
-        ver = self.version()
-        relative = "报告/报告_v1.0_20261102.txt"
-        self.put(relative)
-        legacy = self.put(".project/CHANGELOG.md", "old history")
-        before = snapshot(self.root)
-        self.run_cli(ver, "register", relative, expected=1)
-        self.assertEqual(snapshot(self.root), before)
-        legacy.unlink()
-        mp = self.root / ".project/MAP.md"
-        mp.unlink()
-        mp.mkdir()
-        before = snapshot(self.root)
-        self.run_cli(ver, "register", relative, expected=1)
-        self.assertEqual(snapshot(self.root), before)
-
     def test_retired_publish_cli_and_library_never_write(self):
         ver = self.version()
         self.put(".project/CHANGELOG.md", "## 未发布\n历史\n")
@@ -667,26 +412,6 @@ class WorkspaceTests(unittest.TestCase):
         (self.root / relative).unlink()
         self.assertEqual(snapshot(self.root), before)
 
-    def test_register_optional_map_link_escape_is_zero_write(self):
-        ver = self.version()
-        relative = "报告/报告_v1.0_20261102.txt"
-        self.put(relative)
-        outside = Path(self.temp.name) / "outside"
-        outside.mkdir()
-        mp = self.root / ".project/MAP.md"
-        mp.unlink()
-        try:
-            mp.symlink_to(outside, target_is_directory=True)
-        except OSError:
-            if os.name != "nt":
-                raise
-            result = subprocess.run(["cmd", "/c", "mklink", "/J", str(mp), str(outside)], capture_output=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-        before = snapshot(self.root)
-        self.run_cli(ver, "register", relative, expected=1)
-        self.assertEqual(snapshot(self.root), before)
-        self.assertEqual(snapshot(outside), {})
-
     def test_migration_unclosed_fences_remain_historical(self):
         self.put(".project/CHANGELOG.md", "# 旧标题\n## 当前进度\n旧进度\n```markdown\n## 重要变更记录\n旧文本\n")
         self.run_cli(INIT, self.root, "--apply", "--migrate-changelog")
@@ -700,6 +425,167 @@ class WorkspaceTests(unittest.TestCase):
         text = progress.read_text(encoding="utf-8")
         self.assertLess(text.index(f"`{relative}`"), text.index("## 历史 CHANGELOG 原文"))
         self.assertEqual(text.count("legacy-changelog="), 1)
+
+
+    def test_idempotence_and_project_backups_preserve_progress(self):
+        meta = self.initialize()
+        current = self.put(".project/PROGRESS.md", "current progress and valuable history")
+        before = snapshot(self.root)
+        self.initialize()
+        self.assertEqual(snapshot(self.root), before)
+        for i in range(2):
+            self.put(".project/PROJECT.md", f"facts {i}")
+            self.initialize("--force")
+        self.assertEqual(len(list(meta.glob("PROJECT.md.bak_*"))), 2)
+        self.assertEqual(current.read_text(encoding="utf-8"), "current progress and valuable history")
+        self.assertEqual(list(meta.glob("PROGRESS.md.bak_*")), [])
+
+    def test_default_initialization_never_walks_project(self):
+        self.put("业务/输入.txt")
+        before = snapshot(self.root)
+        with patch.object(os, "walk", side_effect=AssertionError("unexpected project walk")):
+            with patch.object(sys, "argv", [str(INIT), str(self.root)]):
+                self.assertEqual(init_workspace.main(), 0)
+            self.assertEqual(snapshot(self.root), before)
+            with patch.object(sys, "argv", [str(INIT), str(self.root), "--apply"]):
+                self.assertEqual(init_workspace.main(), 0)
+        meta = self.root / ".project"
+        self.assertEqual({p.name for p in meta.iterdir()}, {"PROJECT.md", "PROGRESS.md", "scripts"})
+
+    def test_removed_index_commands_and_apis_have_no_compatibility(self):
+        for flag in ("--with-map", "--force-data"):
+            with self.subTest(flag=flag):
+                before = snapshot(self.root)
+                self.run_cli(INIT, self.root, "--apply", flag, expected=2)
+                self.assertEqual(snapshot(self.root), before)
+        for name in ("append_map", "collect_registered"):
+            self.assertFalse(hasattr(V, name))
+            self.assertNotIn(name, V.__all__)
+        self.assertFalse(hasattr(workspace_common, "iter_files"))
+        for rel in ("scripts/doctor.py", "references/map-spec.md", "references/doctor-spec.md"):
+            self.assertFalse((SKILL / rel).exists())
+        self.assertNotIn("MAP", "".join(init_workspace.build_documents(self.root, self.root / ".project", "项目", "目标").values()))
+
+    def test_legacy_index_files_and_directories_are_completely_ignored(self):
+        for state in ("invalid bytes", "directory"):
+            with self.subTest(state=state):
+                legacy = self.root / ".project/MAP.md"
+                legacy.parent.mkdir(exist_ok=True)
+                if state == "invalid bytes":
+                    legacy.write_bytes(b"\xff\xfeinvalid")
+                else:
+                    legacy.mkdir()
+                root_legacy = self.put("MAP.md", "old root index")
+                old_bytes = legacy.read_bytes() if legacy.is_file() else None
+                self.initialize()
+                ver = self.root / ".project/scripts/_version.py"
+                relative = "报告/报告_v1.0_20261102.txt"
+                self.put(relative)
+                self.run_cli(ver, "register", relative)
+                before = snapshot(self.root)
+                self.run_cli(ver, "register", relative)
+                self.assertEqual(snapshot(self.root), before)
+                self.assertEqual(root_legacy.read_text(encoding="utf-8"), "old root index")
+                if legacy.is_file():
+                    self.assertEqual(legacy.read_bytes(), old_bytes)
+                    legacy.unlink()
+                else:
+                    legacy.rmdir()
+
+    def test_existing_index_external_link_never_read_by_new_tools(self):
+        self.initialize()
+        outside = Path(self.temp.name) / "outside"
+        outside.mkdir()
+        (outside / "unrelated.txt").write_text("outside original", encoding="utf-8")
+        legacy = self.root / ".project/MAP.md"
+        self.make_directory_link(legacy, outside)
+        untouched = snapshot(outside)
+        self.initialize("--refresh-version-tool")
+        relative = "报告/报告_v1.0_20261102.txt"
+        self.put(relative)
+        self.run_cli(self.root / ".project/scripts/_version.py", "register", relative)
+        self.assertEqual(snapshot(outside), untouched)
+        self.assertIn(relative, (self.root / ".project/PROGRESS.md").read_text(encoding="utf-8"))
+
+    def make_directory_link(self, link, target):
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except OSError:
+            if os.name != "nt":
+                raise
+            result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_version_tool_refresh_is_scoped_backed_up_and_idempotent(self):
+        meta = self.initialize()
+        facts = self.put(".project/PROJECT.md", "real business facts")
+        current = self.put(".project/PROGRESS.md", "real current progress")
+        tool = meta / "scripts/_version.py"
+        old = b"legacy module needing explicit upgrade"
+        tool.write_bytes(old)
+        before = snapshot(self.root)
+        self.run_cli(INIT, self.root, "--refresh-version-tool")
+        self.assertEqual(snapshot(self.root), before)
+        self.initialize("--refresh-version-tool")
+        self.assertEqual(tool.read_bytes(), (SKILL / "assets/_version.py").read_bytes())
+        self.assertEqual([p.read_bytes() for p in tool.parent.glob("_version.py.bak_*")], [old])
+        self.assertEqual(facts.read_text(encoding="utf-8"), "real business facts")
+        self.assertEqual(current.read_text(encoding="utf-8"), "real current progress")
+        before = snapshot(self.root)
+        self.initialize("--refresh-version-tool")
+        self.assertEqual(snapshot(self.root), before)
+
+    def test_register_validates_active_progress_before_any_write(self):
+        ver = self.version()
+        relative = "报告/报告_v1.0_20261102.txt"
+        self.put(relative)
+        legacy = self.put(".project/CHANGELOG.md", "old history")
+        before = snapshot(self.root)
+        self.run_cli(ver, "register", relative, expected=1)
+        self.assertEqual(snapshot(self.root), before)
+        legacy.unlink()
+        progress = self.root / ".project/PROGRESS.md"
+        progress.write_bytes(b"\xff\xfeinvalid")
+        before = snapshot(self.root)
+        self.run_cli(ver, "register", relative, expected=1)
+        self.assertEqual(snapshot(self.root), before)
+        progress.unlink()
+        progress.mkdir()
+        before = snapshot(self.root)
+        self.run_cli(ver, "register", relative, expected=1)
+        self.assertEqual(snapshot(self.root), before)
+
+    def test_progress_link_escape_rejected_before_log(self):
+        ver = self.version()
+        progress = self.root / ".project/PROGRESS.md"
+        progress.unlink()
+        outside = Path(self.temp.name) / "outside"
+        outside.mkdir()
+        self.make_directory_link(progress, outside)
+        relative = "报告/报告_v1.0_20261102.txt"
+        self.put(relative)
+        before = snapshot(self.root)
+        self.run_cli(ver, "register", relative, expected=1)
+        self.run_cli(INIT, self.root, "--apply", expected=2)
+        self.assertEqual(snapshot(self.root), before)
+        self.assertEqual(snapshot(outside), {})
+
+    def test_version_scan_and_queries_remain_independent(self):
+        self.initialize()
+        self.put("reports/报告_v1.0_20261101.txt")
+        self.put("reports/报告_v1.1_20261102.txt")
+        self.put("node_modules/ignore_v1.0_20261102.txt")
+        self.put(".project/ignore_v1.0_20261102.txt")
+        with patch.object(V, "ROOT", self.root):
+            self.assertEqual(V.latest("reports", "报告").name, "报告_v1.1_20261102.txt")
+            self.assertEqual(len(V.all_versions("reports", "报告")), 2)
+            self.assertEqual(V.next_version("reports", "报告", ".txt", "20261103").name, "报告_v1.2_20261103.txt")
+            self.assertEqual([r for r,info in V.scan_all() if info],
+                             ["reports/报告_v1.0_20261101.txt", "reports/报告_v1.1_20261102.txt"])
+        ver = self.root / ".project/scripts/_version.py"
+        versions = self.run_cli(ver, "versions", "--dir", "reports", "--name", "报告").stdout
+        self.assertIn("报告_v1.0", versions)
+        self.assertIn("报告_v1.1", versions)
 
 
 if __name__ == "__main__":

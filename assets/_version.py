@@ -14,8 +14,7 @@ from pathlib import Path
 __all__ = [
     "PATTERN", "META", "ROOT", "latest", "all_versions",
     "next_version", "parse", "rel", "scan_all",
-    "append_progress", "append_changelog", "append_map", "publish_changelog",
-    "collect_registered",
+    "append_progress", "append_changelog", "publish_changelog",
 ]
 
 # 名称_v主.次_YYYYMMDD.扩展名
@@ -95,7 +94,7 @@ def next_version(rel_dir: str, name: str, ext: str, today: str) -> Path:
 
 
 def rel(p: Path) -> str:
-    """绝对路径 → 相对项目根的 POSIX 风格路径，供写进 MAP.md。"""
+    """绝对路径 → 相对项目根的 POSIX 风格路径，供写进项目记录。"""
     try:
         return p.relative_to(ROOT).as_posix()
     except ValueError:
@@ -131,50 +130,6 @@ def scan_all(skip_dirs: tuple[str, ...] = ()) -> list[tuple[str, dict | None]]:
 
 
 # ---------------------------------------------------------------- CLI 支撑 --
-
-def collect_registered(map_path: Path) -> tuple[list[str], list[str]]:
-    """Shared MAP syntax for doctor and the self-contained copied version tool."""
-    paths, hints = [], []
-    fence = None
-    in_init = False
-    field_indent = None
-    for line in map_path.read_text(encoding="utf-8-sig").splitlines():
-        stripped = line.strip()
-        marker = re.match(r"^(`{3,}|~{3,})", stripped)
-        if marker:
-            mark = marker[1]
-            if fence is None:
-                fence = mark
-            elif mark[0] == fence[0] and len(mark) >= len(fence):
-                fence = None
-            field_indent = None
-            continue
-        if fence:
-            continue
-        if stripped.startswith("## ") or stripped == "##":
-            in_init = "初扫文件清单" in stripped
-            field_indent = None
-            continue
-        if not stripped or stripped.startswith("#"):
-            field_indent = None
-            continue
-        bullet = re.match(r"^(\s*)[-*]\s+", line)
-        indent = len(bullet[1]) if bullet else 0
-        field = bool(re.match(r"^\s*[-*]\s*[^：:\n]{1,12}[:：]", line)
-                     or re.match(r"^\s*[-*]\s*【登记】", line))
-        child = bullet and field_indent is not None and indent > field_indent
-        if not bullet or not (in_init or field or child):
-            field_indent = None
-            continue
-        if field:
-            field_indent = indent
-        for entry in re.findall(r"`([^`]+)`", line):
-            entry = entry.strip()
-            if not entry or entry == ".project" or entry.startswith(".project/"):
-                continue
-            (hints if any(c in entry for c in "<>*?[") else paths).append(entry)
-    return paths, hints
-
 
 def _section_bounds(text: str, title: str) -> tuple[int, int, int] | None:
     """Locate an H2 section, keeping subheadings, comments and fenced text inside."""
@@ -229,33 +184,6 @@ def append_progress(meta: Path, ver: str, today_iso: str, note: str,
     path.write_bytes(text.encode("utf-8"))
 
 
-def append_map(meta: Path, rel_path: str) -> None:
-    """Register only paths not already indexed as files or covered by a directory."""
-    path = _metadata_file(meta, "MAP.md")
-    if not path.exists():
-        return
-    text = path.read_text(encoding="utf-8-sig")
-    target = _local(rel_path)
-    entries, _ = collect_registered(path)
-    for entry in entries:
-        if Path(entry).is_absolute() or entry.startswith(("/", "\\")):
-            continue
-        try:
-            registered = _local(entry)
-        except (OSError, ValueError):
-            continue
-        if target == registered or (registered.is_dir() and target.is_relative_to(registered)):
-            return
-    line = f"- 产物登记：`{rel_path}`\n"
-    section = _section_bounds(text, "产物登记")
-    if section:
-        _, _, end = section
-        text = text[:end].rstrip("\n") + "\n" + line + ("\n" if text[end:] else "") + text[end:]
-    else:
-        text = text.rstrip("\n") + "\n\n## 产物登记\n\n" + line
-    path.write_text(text, encoding="utf-8")
-
-
 def publish_changelog(meta: Path, today_iso: str, note: str = "") -> int:
     """Retired compatibility entrypoint: reject without reading or writing project data."""
     print("[错误] publish 已移除；请直接维护 PROGRESS 的当前进度与重要变更记录。", file=sys.stderr)
@@ -279,18 +207,14 @@ def append_changelog(meta: Path, ver: str, today_iso: str, note: str,
 
 
 def _register_existing(meta: Path, path: Path, info: dict, note: str) -> None:
-    # Validate every destination before any mutation, including the optional index.
+    # Validate the single active record before any mutation.
     legacy = _metadata_file(meta, "CHANGELOG.md")
     if legacy.exists():
         raise ValueError("发现旧 CHANGELOG；先用初始化器 --migrate-changelog 迁入 PROGRESS，再登记")
     _metadata_file(meta, "PROGRESS.md", required=True)
-    mp = _metadata_file(meta, "MAP.md")
-    if mp.exists():
-        mp.read_text(encoding="utf-8-sig")  # Reject invalid optional-index encoding before logging.
     date = info["date"]
     append_progress(meta, f'{info["major"]}.{info["minor"]}',
                     f"{date[:4]}-{date[4:6]}-{date[6:]}", note, rel(path))
-    append_map(meta, rel(path))
 
 
 def _self_check() -> int:

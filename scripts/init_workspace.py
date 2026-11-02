@@ -8,35 +8,23 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from workspace_common import iter_files, local_path, select_metadata
+from workspace_common import local_path, select_metadata
 
-INIT_LIST_CAP = 100
 AGENTS_BEGIN = "<!-- project-kickoff:begin -->"
 AGENTS_END = "<!-- project-kickoff:end -->"
 
 
-def build_documents(root: Path, meta: Path, name: str, goal: str,
-                    with_map: bool = False) -> dict[str, str]:
+def build_documents(root: Path, meta: Path, name: str, goal: str) -> dict[str, str]:
     prefix = meta.relative_to(root).as_posix()
     versioning_note = (
-        "必用：所有项目脚本统一存放在 `.project/scripts/`；技能自带脚本保留在各自技能目录内。正式交付产物采用 名称_v主.次_YYYYMMDD.ext，使用 `.project/scripts/_version.py` 管理版本，生成并验证后登记到 PROGRESS；已采用 MAP 时按需补充索引。代码、配置、外来原件和必须固定文件名的产物沿用项目规则。"
+        "必用：所有项目脚本统一存放在 `.project/scripts/`；技能自带脚本保留在各自技能目录内。正式交付产物采用 名称_v主.次_YYYYMMDD.ext，使用 `.project/scripts/_version.py` 管理版本，生成并验证后登记到 PROGRESS。代码、配置、外来原件和必须固定文件名的产物沿用项目规则。"
     )
-    # Include the instruction file that this plan will create, before writing MAP.
-    files = sorted(set(iter_files(root)) | {"AGENTS.md"}) if with_map else []
-    groups: dict[str, list[str]] = {}
-    for f in files[:INIT_LIST_CAP]:
-        key = f.split("/", 1)[0] + "/" if "/" in f else "（项目根）"
-        groups.setdefault(key, []).append(f)
-    listing = "\n\n".join(f"### {k}\n\n" + "\n".join(f"- `{p}`" for p in v)
-                             for k, v in groups.items()) or "（暂无文件。）"
-    if len(files) > INIT_LIST_CAP:
-        listing += f"\n\n仅列前 {INIT_LIST_CAP} 个，共 {len(files)} 个；这是部分快照，不代表完整覆盖。"
     documents = {
         "AGENTS.md": f"""## 项目工作指引
 
 - 开始项目任务时读取 `{prefix}/PROJECT.md` 和 `{prefix}/PROGRESS.md` 的“当前进度”，了解目标、完成条件及下一步；同一对话中已读且未变化时可复用，追溯时再读重要变更记录。
 - 阶段成果、阻塞或下一步发生实质变化时更新 PROGRESS，带用户时区日期，写明实际完成范围、验证证据、未解决项与下一步；重要变更同页追加，不逐条回复记日志。
-- 仅在已采用索引且需要定位文件时读取 `{prefix}/MAP.md`；无索引或登记失效时定向检索实际文件，按需维护相关登记，不为此建立索引。
+- 需要定位文件或核实依赖时，用 `rg --files`、`rg` 或目录工具定向检索实际文件，不将历史记录当作当前磁盘事实。
 """,
         "PROJECT.md": f"""# {name}
 
@@ -61,22 +49,7 @@ def build_documents(root: Path, meta: Path, name: str, goal: str,
 {versioning_note}
 """,
         "PROGRESS.md": "# 项目进度与重要变更\n\n## 当前进度\n\n- 更新时间：待首次实际更新时填写（用户时区）。\n- 当前状态：待根据实际任务核实。\n- 已完成与验证证据：待核实，不将计划视为完成。\n- 未解决项或阻塞：待核实。\n- 下一步：按用户目标确定。\n\n## 重要变更记录\n\n（暂无）\n",
-        "MAP.md": f"""# MAP.md — {name} 的文件上下游索引
-
-路径相对项目根。索引是辅助资料，磁盘现状需核实；允许按需检索未登记文件。
-仅登记关键资产或目录，不要求全项目逐文件登记；初扫仅表示发现文件，不证明业务关系。
-
-## 环节
-
-待依据事实补充输入、脚本、输出及下游关系。
-
-## 初扫文件清单（待归类）
-
-{listing}
-""",
     }
-    if not with_map:
-        documents.pop("MAP.md")
     return documents
 
 
@@ -144,8 +117,7 @@ def main() -> int:
     ap.add_argument("--goal", default="")
     ap.add_argument("--apply", action="store_true", help="写入；默认只预览")
     ap.add_argument("--force", action="store_true", help="备份后刷新 PROJECT/版本模块；AGENTS 仅更新托管区块")
-    ap.add_argument("--force-data", action="store_true", help="仅在 --with-map 时备份后重置 MAP；保留当前进度与历史")
-    ap.add_argument("--with-map", action="store_true", help="显式启用 MAP 初扫与创建；默认不扫描、不创建")
+    ap.add_argument("--refresh-version-tool", action="store_true", help="仅备份后刷新项目版本模块，保留 PROJECT 与 PROGRESS")
     ap.add_argument("--migrate-changelog", action="store_true", help="将旧 CHANGELOG 原文并入 PROGRESS，保留原件为只读历史")
     args = ap.parse_args()
     try:
@@ -156,9 +128,9 @@ def main() -> int:
         if override.is_file() and override.read_text(encoding="utf-8-sig").strip():
             raise ValueError("根目录 AGENTS.override.md 会遮蔽 AGENTS.md；请先明确项目指令入口，未写入任何文件")
         meta = select_metadata(root)
-        if not meta.exists() and any((root / n).exists() for n in ("MAP.md", "PROJECT.md")):
-            raise ValueError("根目录已有项目说明或索引；未创建并行资料，请按现有项目约定处理")
-        documents = build_documents(root, meta, args.name or root.name, args.goal, args.with_map)
+        if not meta.exists() and (root / "PROJECT.md").exists():
+            raise ValueError("根目录已有项目说明；未创建并行资料，请按现有项目约定处理")
+        documents = build_documents(root, meta, args.name or root.name, args.goal)
         agents_body = documents.pop("AGENTS.md")
         plan = {meta / k: v.encode("utf-8") for k, v in documents.items()}
         agents_path = root / "AGENTS.md"
@@ -191,10 +163,11 @@ def main() -> int:
                 raise ValueError(f"目标不是可更新的普通文件：{path}")
         plan[agents_path] = merge_agents(agents_path, agents_body)
         for path, content in plan.items():
-            overwrite = (True if path == agents_path or
-                         (legacy is not None and path == meta / "scripts" / "_version.py") else legacy is not None
-                         if path.name == "PROGRESS.md" else args.force_data
-                         if path.name == "MAP.md" else args.force)
+            overwrite = (path == agents_path or
+                         (path.name == "PROGRESS.md" and legacy is not None) or
+                         (path == meta / "scripts" / "_version.py" and
+                          (args.force or args.refresh_version_tool or legacy is not None)) or
+                         (path.name == "PROJECT.md" and args.force))
             if args.apply:
                 write_file(path, content, overwrite)
             else:
