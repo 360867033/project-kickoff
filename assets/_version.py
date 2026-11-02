@@ -1,5 +1,5 @@
-"""Optional version-file library and CLI; new prints a path by default.
-Copied into .project/scripts when opted in.
+"""Version-file library and CLI; new prints a path by default.
+Copied into .project/scripts during initialization.
 Use pinned paths for reproducible inputs. This module is not a universal naming rule.
 """
 
@@ -14,7 +14,7 @@ from pathlib import Path
 __all__ = [
     "PATTERN", "META", "ROOT", "latest", "all_versions",
     "next_version", "parse", "rel", "scan_all",
-    "append_changelog", "append_map", "publish_changelog",
+    "append_progress", "append_changelog", "append_map", "publish_changelog",
     "collect_registered",
 ]
 
@@ -199,11 +199,15 @@ def _section_bounds(text: str, title: str) -> tuple[int, int, int] | None:
     return (*start, len(text)) if start is not None else None
 
 
-def append_changelog(meta: Path, ver: str, today_iso: str, note: str,
+def append_progress(meta: Path, ver: str, today_iso: str, note: str,
                      artifact_path: str) -> None:
-    """Record a file event once; its identity lives in CHANGELOG, independently of MAP."""
-    path = meta / "CHANGELOG.md"
-    text = path.read_text(encoding="utf-8-sig") if path.exists() else "# 项目记录\n"
+    """Record a file event once without changing the current-progress section."""
+    if _metadata_file(meta, "CHANGELOG.md").exists():
+        raise ValueError("发现旧 CHANGELOG；先显式迁移到 PROGRESS，再登记")
+    path = _metadata_file(meta, "PROGRESS.md", required=True)
+    # Preserve current-progress bytes, including BOM and CRLF, outside the edited section.
+    text = path.read_bytes().decode("utf-8")
+    newline = "\r\n" if "\r\n" in text else "\n"
     identity = os.path.normcase(_local(artifact_path).relative_to(ROOT.resolve()).as_posix())
     key = hashlib.sha256(identity.replace("\\", "/").encode("utf-8")).hexdigest()
     marker = f"<!-- project-kickoff:artifact={key} -->"
@@ -211,23 +215,23 @@ def append_changelog(meta: Path, ver: str, today_iso: str, note: str,
         return
     note = " ".join(note.splitlines()) or "（未填说明）"
     new_line = f"- {today_iso} | 产物新增 | `{artifact_path}` | v{ver} | {note} {marker}"
-    section = _section_bounds(text, "未发布")
+    section = _section_bounds(text, "重要变更记录")
     if section:
         _, begin, end = section
-        body = text[begin:end].strip("\n")
+        body = text[begin:end].strip("\r\n")
         if body.strip() == "（暂无）":
             body = ""
-        text = (text[:begin] + "\n" + new_line + "\n"
-                + ("\n" + body + "\n" if body else "")
-                + ("\n" if text[end:] else "") + text[end:])
+        text = (text[:begin] + newline + new_line + newline
+                + (newline + body + newline if body else "")
+                + (newline if text[end:] else "") + text[end:])
     else:
-        text = text.rstrip("\n") + "\n\n## 未发布\n\n" + new_line + "\n"
-    path.write_text(text, encoding="utf-8")
+        text = text + newline + "## 重要变更记录" + newline * 2 + new_line + newline
+    path.write_bytes(text.encode("utf-8"))
 
 
 def append_map(meta: Path, rel_path: str) -> None:
     """Register only paths not already indexed as files or covered by a directory."""
-    path = meta / "MAP.md"
+    path = _metadata_file(meta, "MAP.md")
     if not path.exists():
         return
     text = path.read_text(encoding="utf-8-sig")
@@ -253,48 +257,39 @@ def append_map(meta: Path, rel_path: str) -> None:
 
 
 def publish_changelog(meta: Path, today_iso: str, note: str = "") -> int:
-    """Move the complete unpublished body into a dated batch, preserving project prose."""
-    from datetime import date
+    """Retired compatibility entrypoint: reject without reading or writing project data."""
+    print("[错误] publish 已移除；请直接维护 PROGRESS 的当前进度与重要变更记录。", file=sys.stderr)
+    return 1
 
-    date.fromisoformat(today_iso)
-    path = meta / "CHANGELOG.md"
-    if not path.exists():
-        print(f"[错误] 未找到 {path}", file=sys.stderr)
-        return 1
-    text = path.read_text(encoding="utf-8-sig")
-    section = _section_bounds(text, "未发布")
-    if not section:
-        print("未发现「未发布」段，无需发布。")
-        return 0
-    _, begin, end = section
-    body = text[begin:end].strip("\n")
-    if body.strip() in ("", "（暂无）"):
-        print("「未发布」段为空，无需发布。")
-        return 0
-    block = f"### {today_iso}\n\n"
-    if note:
-        block += note + "\n\n"
-    block += body + "\n\n"
-    out = text[:begin] + "\n（暂无）\n\n" + text[end:]
-    published = _section_bounds(out, "已发布")
-    if published:
-        _, pub_begin, _ = published
-        out = out[:pub_begin] + "\n" + block + out[pub_begin:]
-    else:
-        out = out.rstrip("\n") + "\n\n## 已发布\n\n" + block
-    path.write_text(out, encoding="utf-8")
-    print(f"已按 {today_iso} 整理项目记录：完整正文移入「已发布」段")
-    return 0
+
+def _metadata_file(meta: Path, filename: str, required: bool = False) -> Path:
+    raw = meta / filename
+    _local(raw.relative_to(ROOT).as_posix())
+    if raw.is_symlink() or (raw.exists() and not raw.is_file()):
+        raise ValueError(f"辅助资料不是普通文件：{raw}")
+    if required and not raw.is_file():
+        raise ValueError(f"缺少辅助资料：{raw}；请先初始化或迁移旧 CHANGELOG")
+    return raw
+
+
+def append_changelog(meta: Path, ver: str, today_iso: str, note: str,
+                     artifact_path: str) -> None:
+    """Compatibility alias: new records go only to PROGRESS."""
+    append_progress(meta, ver, today_iso, note, artifact_path)
 
 
 def _register_existing(meta: Path, path: Path, info: dict, note: str) -> None:
-    for filename in ("MAP.md", "CHANGELOG.md"):
-        destination = _local((meta / filename).relative_to(ROOT).as_posix())
-        if not destination.is_file():
-            raise ValueError(f"缺少辅助资料：{destination}")
+    # Validate every destination before any mutation, including the optional index.
+    legacy = _metadata_file(meta, "CHANGELOG.md")
+    if legacy.exists():
+        raise ValueError("发现旧 CHANGELOG；先用初始化器 --migrate-changelog 迁入 PROGRESS，再登记")
+    _metadata_file(meta, "PROGRESS.md", required=True)
+    mp = _metadata_file(meta, "MAP.md")
+    if mp.exists():
+        mp.read_text(encoding="utf-8-sig")  # Reject invalid optional-index encoding before logging.
     date = info["date"]
-    append_changelog(meta, f'{info["major"]}.{info["minor"]}',
-                     f"{date[:4]}-{date[4:6]}-{date[6:]}", note, rel(path))
+    append_progress(meta, f'{info["major"]}.{info["minor"]}',
+                    f"{date[:4]}-{date[4:6]}-{date[6:]}", note, rel(path))
     append_map(meta, rel(path))
 
 
@@ -340,10 +335,6 @@ def main(argv: list[str] | None = None) -> int:
     p_ver.add_argument("--dir", required=True)
     p_ver.add_argument("--name", required=True)
 
-    p_pub = sub.add_parser("publish", help="把「未发布」段全部条目移入「已发布」段")
-    p_pub.add_argument("--note", default="", help="发布说明（写入发布块）")
-    p_pub.add_argument("--today", default="", help="日期 YYYYMMDD，默认今天")
-
     p_reg = sub.add_parser("register", help="登记已由实际文档工具生成的版本文件")
     p_reg.add_argument("path", help="项目根相对路径")
     p_reg.add_argument("--note", default="")
@@ -386,12 +377,6 @@ def main(argv: list[str] | None = None) -> int:
         for h in hist:
             print(h)
         return 0
-
-    if args.cmd == "publish":
-        _local(".project/CHANGELOG.md")
-        today = args.today or _date.today().strftime("%Y%m%d")
-        today_iso = f"{today[:4]}-{today[4:6]}-{today[6:]}"
-        return publish_changelog(meta, today_iso, args.note)
 
     # ---- new ----
     today = args.today or _date.today().strftime("%Y%m%d")

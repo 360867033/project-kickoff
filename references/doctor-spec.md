@@ -8,7 +8,7 @@ python "<skill>/scripts/doctor.py" "<项目目录>" --check-coverage --json
 python "<skill>/scripts/doctor.py" "<项目目录>" --versioned-dir "报告" --json
 ```
 
-只读取 `.project/MAP.md`。无索引仅报告未启用，不自动改用其他位置的同名文件，也不要求创建资料。根目录 AGENTS 提供工作指引，PROJECT 保存项目事实，doctor 不读取它们的内容。
+只读取 `.project/MAP.md`。无索引仅报告未启用，不自动改用其他位置的同名文件，也不要求创建资料。根目录 AGENTS 提供工作指引，PROJECT 保存稳定项目事实，PROGRESS 保存当前进度与重要变更，doctor 不读取它们的内容。
 
 | 字段 | 含义 | 影响退出码 |
 |---|---|---|

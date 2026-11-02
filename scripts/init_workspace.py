@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -13,13 +15,14 @@ AGENTS_BEGIN = "<!-- project-kickoff:begin -->"
 AGENTS_END = "<!-- project-kickoff:end -->"
 
 
-def build_documents(root: Path, meta: Path, name: str, goal: str) -> dict[str, str]:
+def build_documents(root: Path, meta: Path, name: str, goal: str,
+                    with_map: bool = False) -> dict[str, str]:
     prefix = meta.relative_to(root).as_posix()
     versioning_note = (
-        "必用：所有项目脚本统一存放在 `.project/scripts/`；技能自带脚本保留在各自技能目录内。正式交付产物采用 名称_v主.次_YYYYMMDD.ext，使用 `.project/scripts/_version.py` 管理版本，生成并验证后登记到 MAP 和 CHANGELOG；代码、配置、外来原件和必须固定文件名的产物沿用项目规则。"
+        "必用：所有项目脚本统一存放在 `.project/scripts/`；技能自带脚本保留在各自技能目录内。正式交付产物采用 名称_v主.次_YYYYMMDD.ext，使用 `.project/scripts/_version.py` 管理版本，生成并验证后登记到 PROGRESS；已采用 MAP 时按需补充索引。代码、配置、外来原件和必须固定文件名的产物沿用项目规则。"
     )
     # Include the instruction file that this plan will create, before writing MAP.
-    files = sorted(set(iter_files(root)) | {"AGENTS.md"})
+    files = sorted(set(iter_files(root)) | {"AGENTS.md"}) if with_map else []
     groups: dict[str, list[str]] = {}
     for f in files[:INIT_LIST_CAP]:
         key = f.split("/", 1)[0] + "/" if "/" in f else "（项目根）"
@@ -28,12 +31,12 @@ def build_documents(root: Path, meta: Path, name: str, goal: str) -> dict[str, s
                              for k, v in groups.items()) or "（暂无文件。）"
     if len(files) > INIT_LIST_CAP:
         listing += f"\n\n仅列前 {INIT_LIST_CAP} 个，共 {len(files)} 个；这是部分快照，不代表完整覆盖。"
-    return {
+    documents = {
         "AGENTS.md": f"""## 项目工作指引
 
-- 开始项目任务时读取 `{prefix}/PROJECT.md`，了解目标、范围、当前阶段与完成条件；同一对话中已读且未变化时可复用。
-- 定位文件与上下游关系时读取 `{prefix}/MAP.md`；回顾变更时读取 `{prefix}/CHANGELOG.md`。
-- 索引缺失或失效时定向检索实际文件，并同步本次改动涉及的关键登记。
+- 开始项目任务时读取 `{prefix}/PROJECT.md` 和 `{prefix}/PROGRESS.md` 的“当前进度”，了解目标、完成条件及下一步；同一对话中已读且未变化时可复用，追溯时再读重要变更记录。
+- 阶段成果、阻塞或下一步发生实质变化时更新 PROGRESS，带用户时区日期，写明实际完成范围、验证证据、未解决项与下一步；重要变更同页追加，不逐条回复记日志。
+- 仅在已采用索引且需要定位文件时读取 `{prefix}/MAP.md`；无索引或登记失效时定向检索实际文件，按需维护相关登记，不为此建立索引。
 """,
         "PROJECT.md": f"""# {name}
 
@@ -45,9 +48,7 @@ def build_documents(root: Path, meta: Path, name: str, goal: str) -> dict[str, s
 
 按用户请求及现有项目说明补充；未知事项标为待确认。
 
-## 当前阶段
-
-待根据实际任务核实。
+当前进度、阻塞、验证证据与下一步统一维护在 `PROGRESS.md`，不在此重复维护动态状态。
 
 ## 项目级技能
 
@@ -59,7 +60,7 @@ def build_documents(root: Path, meta: Path, name: str, goal: str) -> dict[str, s
 
 {versioning_note}
 """,
-        "CHANGELOG.md": "# 项目记录\n\n按项目需要记录变更，不自动发布。\n\n## 未发布\n\n（暂无）\n",
+        "PROGRESS.md": "# 项目进度与重要变更\n\n## 当前进度\n\n- 更新时间：待首次实际更新时填写（用户时区）。\n- 当前状态：待根据实际任务核实。\n- 已完成与验证证据：待核实，不将计划视为完成。\n- 未解决项或阻塞：待核实。\n- 下一步：按用户目标确定。\n\n## 重要变更记录\n\n（暂无）\n",
         "MAP.md": f"""# MAP.md — {name} 的文件上下游索引
 
 路径相对项目根。索引是辅助资料，磁盘现状需核实；允许按需检索未登记文件。
@@ -74,6 +75,28 @@ def build_documents(root: Path, meta: Path, name: str, goal: str) -> dict[str, s
 {listing}
 """,
     }
+    if not with_map:
+        documents.pop("MAP.md")
+    return documents
+
+
+def migrate_changelog(meta: Path, progress: bytes, legacy: bytes) -> tuple[bytes, Path]:
+    """Append exact legacy prose once; preserve original bytes as a named history file."""
+    digest = hashlib.sha256(legacy).hexdigest()
+    marker = f"<!-- project-kickoff:legacy-changelog={digest} -->"
+    text = progress.decode("utf-8-sig")
+    body = legacy.decode("utf-8-sig")
+    # A longer fence keeps legacy headings and even unclosed fences historical.
+    fence = "`" * max(3, max((len(m) + 1 for m in re.findall(r"`+", body)), default=0))
+    archive = meta / f"CHANGELOG.md.history_{digest[:16]}"
+    if marker not in text:
+        block = (
+            "## 历史 CHANGELOG 原文（只读）\n\n"
+            f"{marker}\n\n以下为原文；原有发布分类仅为历史，后续统一维护本文件。\n\n"
+            + fence + "markdown\n" + body + ("" if body.endswith("\n") else "\n")
+            + fence + "\n")
+        progress += (b"\n" if progress.endswith(b"\n") else b"\n\n") + block.encode("utf-8")
+    return progress, archive
 
 
 def merge_agents(path: Path, body: str) -> bytes:
@@ -121,7 +144,9 @@ def main() -> int:
     ap.add_argument("--goal", default="")
     ap.add_argument("--apply", action="store_true", help="写入；默认只预览")
     ap.add_argument("--force", action="store_true", help="备份后刷新 PROJECT/版本模块；AGENTS 仅更新托管区块")
-    ap.add_argument("--force-data", action="store_true", help="备份后重置 MAP/CHANGELOG")
+    ap.add_argument("--force-data", action="store_true", help="仅在 --with-map 时备份后重置 MAP；保留当前进度与历史")
+    ap.add_argument("--with-map", action="store_true", help="显式启用 MAP 初扫与创建；默认不扫描、不创建")
+    ap.add_argument("--migrate-changelog", action="store_true", help="将旧 CHANGELOG 原文并入 PROGRESS，保留原件为只读历史")
     args = ap.parse_args()
     try:
         root = Path(args.target).resolve()
@@ -133,21 +158,43 @@ def main() -> int:
         meta = select_metadata(root)
         if not meta.exists() and any((root / n).exists() for n in ("MAP.md", "PROJECT.md")):
             raise ValueError("根目录已有项目说明或索引；未创建并行资料，请按现有项目约定处理")
-        documents = build_documents(root, meta, args.name or root.name, args.goal)
+        documents = build_documents(root, meta, args.name or root.name, args.goal, args.with_map)
         agents_body = documents.pop("AGENTS.md")
         plan = {meta / k: v.encode("utf-8") for k, v in documents.items()}
         agents_path = root / "AGENTS.md"
         plan[agents_path] = agents_body.encode("utf-8")
         source = Path(__file__).resolve().parent.parent / "assets" / "_version.py"
         plan[meta / "scripts" / "_version.py"] = source.read_bytes()
+        legacy_path = meta / "CHANGELOG.md"
+        legacy = None
+        archive = None
+        if legacy_path.exists() or legacy_path.is_symlink():
+            local_path(root, ".project/CHANGELOG.md")
+            if legacy_path.is_symlink() or not legacy_path.is_file():
+                raise ValueError("旧 CHANGELOG 不是可迁移的普通文件，未写入任何文件")
+            if not args.migrate_changelog:
+                raise ValueError("发现旧 CHANGELOG；请明确使用 --migrate-changelog 迁入 PROGRESS，未写入任何文件")
+            progress_path = meta / "PROGRESS.md"
+            local_path(root, ".project/PROGRESS.md")
+            if progress_path.is_symlink() or (progress_path.exists() and not progress_path.is_file()):
+                raise ValueError("PROGRESS 不是可更新的普通文件，未写入任何文件")
+            legacy = legacy_path.read_bytes()
+            existing = progress_path.read_bytes() if progress_path.exists() else plan[progress_path]
+            plan[progress_path], archive = migrate_changelog(meta, existing, legacy)
+            local_path(root, archive.relative_to(root).as_posix())
+            if archive.is_symlink() or (archive.exists() and
+                    (not archive.is_file() or archive.read_bytes() != legacy)):
+                raise ValueError("历史原件位置冲突，未写入任何文件")
         for path in plan:
             local_path(root, path.relative_to(root).as_posix())
             if path.is_symlink() or (path.exists() and not path.is_file()):
                 raise ValueError(f"目标不是可更新的普通文件：{path}")
         plan[agents_path] = merge_agents(agents_path, agents_body)
         for path, content in plan.items():
-            overwrite = (True if path == agents_path else args.force_data
-                         if path.name in {"MAP.md", "CHANGELOG.md"} else args.force)
+            overwrite = (True if path == agents_path or
+                         (legacy is not None and path == meta / "scripts" / "_version.py") else legacy is not None
+                         if path.name == "PROGRESS.md" else args.force_data
+                         if path.name == "MAP.md" else args.force)
             if args.apply:
                 write_file(path, content, overwrite)
             else:
@@ -155,6 +202,15 @@ def main() -> int:
                           "备份后更新托管区块，保留原文" if path == agents_path and path.exists() else
                           "备份后覆盖" if path.exists() and overwrite else "保留" if path.exists() else "新建")
                 print(f"[预览] {action}：{path}")
+        if legacy is not None:
+            if args.apply:
+                if not archive.exists():
+                    with archive.open("xb") as fh:
+                        fh.write(legacy)
+                legacy_path.unlink()
+                print(f"原 CHANGELOG 已保留为只读历史：{archive}")
+            else:
+                print(f"[预览] 将旧 CHANGELOG 原文并入 PROGRESS，并保留原件为：{archive}")
         if not args.apply:
             print("预览结束，未写入任何文件。执行时加 --apply。")
         return 0
