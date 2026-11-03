@@ -241,12 +241,17 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_mandatory_versioning_is_installed_without_flags(self):
         meta = self.initialize()
-        text = (meta / "PROJECT.md").read_text(encoding="utf-8")
-        self.assertIn("必用", text)
-        self.assertIn("名称_v主.次_YYYYMMDD.ext", text)
+        agents = (self.root / "AGENTS.md").read_text(encoding="utf-8")
+        project = (meta / "PROJECT.md").read_text(encoding="utf-8")
+        self.assertIn("名称_v主.次_YYYYMMDD.ext", agents)
+        self.assertIn(".project/scripts/_version.py", agents)
+        self.assertIn("register", agents)
+        self.assertNotIn("rg --files", agents)
+        self.assertNotIn("名称_v主.次_YYYYMMDD.ext", project)
+        self.assertNotIn("_version.py", project)
+        self.assertIn(".project/scripts/", project)
         self.assertEqual((meta / "scripts/_version.py").read_bytes(),
                          (SKILL / "assets/_version.py").read_bytes())
-        self.assertNotIn("名称_v主.次_YYYYMMDD.ext", (self.root / "AGENTS.md").read_text(encoding="utf-8"))
 
     def test_mandatory_versioning_has_no_enable_or_disable_flags(self):
         before = snapshot(self.root)

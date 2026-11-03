@@ -20,7 +20,7 @@ git clone https://github.com/360867033/project-kickoff.git $target
 - PROJECT 维护稳定目标、范围与完成条件；PROGRESS 同页维护当前进度、完成证据、阻塞、下一步和重要变更。
 - 开始任务默认只读当前进度，追溯时再读历史；实质变化才更新并带用户时区日期，不逐条回复记日志。
 - 项目脚本统一放在 `.project/scripts/`；项目级技能放在 `.project/skill/<技能名>/`，自带资源随技能保存，按需创建并记录实际加载入口。
-- 正式交付产物必用 `名称_v主.次_YYYYMMDD.ext` 和版本工具；new 只计算路径，生成并验证后 register，latest / versions 查询历史。
+- 版本规则与 `.project/scripts/_version.py` 工具入口只写入 AGENTS，PROJECT 不重复；AGENTS 不加入通用文件检索提示。正式交付产物必用 `名称_v主.次_YYYYMMDD.ext`，new 只计算路径，生成并验证后 register，latest / versions 查询历史。
 - 默认只预览，`--apply` 才写入；支持备份、幂等刷新和显式旧记录迁移。
 
 ## 快速使用
@@ -48,7 +48,7 @@ python "$HOME\.codex\skills\project-kickoff\scripts\init_workspace.py" 'C:\path\
 # 核对预览后加 --apply
 ```
 
-agent 在授权内备份后定向更新旧 PROJECT 导航、重复动态状态与过时约定，保留稳定业务事实。旧管理资料退出活动目录前核对备份，不批量处理其他项目。register 仅追加重要变更，不改写当前进度；旧 publish 分类操作零写拒绝。`--force` 会刷新 PROJECT 与版本模块，单独升级工具使用窄范围刷新选项。
+agent 在授权内备份后定向更新旧 PROJECT 导航、重复动态状态与过时约定，保留稳定业务事实。版本规则集中到 AGENTS 后，定向移除 PROJECT 的重复通用版本管理段并保留独立脚本位置；初始化器默认保留已有 PROJECT，不自动清理。旧管理资料退出活动目录前核对备份，不批量处理其他项目。register 仅追加重要变更，不改写当前进度；旧 publish 分类操作零写拒绝。`--force` 会刷新 PROJECT 与版本模块，单独升级工具使用窄范围刷新选项。
 
 ## 验证
 

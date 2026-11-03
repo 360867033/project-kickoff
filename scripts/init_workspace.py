@@ -16,15 +16,12 @@ AGENTS_END = "<!-- project-kickoff:end -->"
 
 def build_documents(root: Path, meta: Path, name: str, goal: str) -> dict[str, str]:
     prefix = meta.relative_to(root).as_posix()
-    versioning_note = (
-        "必用：所有项目脚本统一存放在 `.project/scripts/`；技能自带脚本保留在各自技能目录内。正式交付产物采用 名称_v主.次_YYYYMMDD.ext，使用 `.project/scripts/_version.py` 管理版本，生成并验证后登记到 PROGRESS。代码、配置、外来原件和必须固定文件名的产物沿用项目规则。"
-    )
     documents = {
         "AGENTS.md": f"""## 项目工作指引
 
 - 开始项目任务时读取 `{prefix}/PROJECT.md` 和 `{prefix}/PROGRESS.md` 的“当前进度”，了解目标、完成条件及下一步；同一对话中已读且未变化时可复用，追溯时再读重要变更记录。
 - 阶段成果、阻塞或下一步发生实质变化时更新 PROGRESS，带用户时区日期，写明实际完成范围、验证证据、未解决项与下一步；重要变更同页追加，不逐条回复记日志。
-- 需要定位文件或核实依赖时，用 `rg --files`、`rg` 或目录工具定向检索实际文件，不将历史记录当作当前磁盘事实。
+- 正式交付产物采用 `名称_v主.次_YYYYMMDD.ext`，生成并验证后使用 `{prefix}/scripts/_version.py` 的 `register` 登记到 PROGRESS；代码、配置、外来原件和必须固定文件名的产物沿用项目约定。
 """,
         "PROJECT.md": f"""# {name}
 
@@ -44,9 +41,9 @@ def build_documents(root: Path, meta: Path, name: str, goal: str) -> dict[str, s
 
 此位置是项目存放约定，不代表运行环境会自动发现或加载；使用时读取对应 SKILL.md，并在此记录实际运行环境的加载入口。已有技能迁移需在用户授权范围内核对引用与加载入口、备份并更新相关登记；个人或全局技能沿用原安装位置。
 
-## 产物版本管理
+## 项目脚本
 
-{versioning_note}
+所有独立项目脚本统一存放在 `.project/scripts/`，包括处理和检查脚本；技能自带脚本保留在各自技能目录内。
 """,
         "PROGRESS.md": "# 项目进度与重要变更\n\n## 当前进度\n\n- 更新时间：待首次实际更新时填写（用户时区）。\n- 当前状态：待根据实际任务核实。\n- 已完成与验证证据：待核实，不将计划视为完成。\n- 未解决项或阻塞：待核实。\n- 下一步：按用户目标确定。\n\n## 重要变更记录\n\n（暂无）\n",
     }
