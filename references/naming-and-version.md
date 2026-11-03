@@ -2,7 +2,7 @@
 
 正式交付产物采用 `名称_v主.次_YYYYMMDD.ext`，如 `年度报告_v1.2_20261019.docx`。源代码、配置、外来原件和必须固定文件名的产物沿用项目规则。版本跳号可合理存在，不视为业务错误。
 
-项目脚本统一存放在 `.project/scripts/`，版本模块固定复制为 `.project/scripts/_version.py`。项目级技能存放在 `.project/skill/<技能名>/`，自带脚本随技能保存。PROJECT 记录独立项目脚本位置、技能约定与实际加载入口；项目中的版本管理规则和工具入口只写入 AGENTS，不在 PROJECT 重复。
+项目脚本统一存放在 `.project/scripts/`，版本模块固定复制为 `.project/scripts/_version.py`。项目级技能存放在 `.project/skill/<技能名>/`，自带脚本随技能保存。版本规则、工具入口及脚本/技能目录规则只写入 AGENTS；实际技能、调用条件与入口记录在 `.project/skill.md`，不在 PROJECT 重复。
 
 ```powershell
 python .project/scripts/_version.py new --dir "报告" --name "年度报告" --ext .docx --today 20261019

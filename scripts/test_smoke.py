@@ -64,7 +64,7 @@ class WorkspaceTests(unittest.TestCase):
         before = {p: self.put(p).read_bytes() for p in paths}
         meta = self.initialize()
         self.assertEqual({p.name for p in meta.iterdir()},
-                         {"PROJECT.md", "PROGRESS.md", "scripts"})
+                         {"PROJECT.md", "PROGRESS.md", "skill.md", "scripts"})
         for p, data in before.items():
             actual = (self.root / p).read_bytes()
             if p == "AGENTS.md":
@@ -249,7 +249,8 @@ class WorkspaceTests(unittest.TestCase):
         self.assertNotIn("rg --files", agents)
         self.assertNotIn("名称_v主.次_YYYYMMDD.ext", project)
         self.assertNotIn("_version.py", project)
-        self.assertIn(".project/scripts/", project)
+        self.assertIn(".project/scripts/", agents)
+        self.assertNotIn(".project/scripts/", project)
         self.assertEqual((meta / "scripts/_version.py").read_bytes(),
                          (SKILL / "assets/_version.py").read_bytes())
 
@@ -268,13 +269,34 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(snapshot(self.root), before)
         self.assertFalse((self.root / ".project").exists())
 
-    def test_project_skill_storage_contract_is_available_from_project(self):
+    def test_project_skill_storage_and_index_are_available_from_agents(self):
         meta = self.initialize()
+        agents = (self.root / "AGENTS.md").read_text(encoding="utf-8")
         project = (meta / "PROJECT.md").read_text(encoding="utf-8")
-        self.assertIn("`.project/skill/<技能名>/SKILL.md`", project)
-        self.assertIn("技能自带的 scripts/、references/、assets/", project)
-        self.assertIn("不代表运行环境会自动发现或加载", project)
+        index = (meta / "skill.md").read_text(encoding="utf-8")
+        self.assertIn("`.project/skill/<技能名>/`", agents)
+        self.assertIn("scripts/、references/、assets/", agents)
+        self.assertIn("`.project/skill.md`", agents)
+        self.assertIn("何时调用", index)
+        self.assertIn("入口文件", index)
+        self.assertIn("暂无已登记技能", index)
+        self.assertNotIn(".project/skill/", project)
         self.assertFalse((meta / "skill").exists())
+
+    def test_existing_skill_index_is_preserved_even_on_force_or_tool_refresh(self):
+        index = self.put(".project/skill.md", "# 技能索引\n真实技能和调用条件。\n")
+        original = index.read_bytes()
+        for args in [(), ("--force",), ("--refresh-version-tool",)]:
+            self.initialize(*args)
+            self.assertEqual(index.read_bytes(), original)
+        self.assertEqual(list(index.parent.glob("skill.md.bak_*")), [])
+
+    def test_invalid_skill_index_target_stops_before_any_write(self):
+        (self.root / ".project/skill.md").mkdir(parents=True)
+        before = snapshot(self.root)
+        self.run_cli(INIT, self.root, "--apply", expected=2)
+        self.assertEqual(snapshot(self.root), before)
+        self.assertFalse((self.root / "AGENTS.md").exists())
 
     def test_existing_project_skill_is_preserved_on_refresh(self):
         skill = self.put(".project/skill/report-review/SKILL.md", "# 项目审核技能\n已有规则。\n")
@@ -455,7 +477,7 @@ class WorkspaceTests(unittest.TestCase):
             with patch.object(sys, "argv", [str(INIT), str(self.root), "--apply"]):
                 self.assertEqual(init_workspace.main(), 0)
         meta = self.root / ".project"
-        self.assertEqual({p.name for p in meta.iterdir()}, {"PROJECT.md", "PROGRESS.md", "scripts"})
+        self.assertEqual({p.name for p in meta.iterdir()}, {"PROJECT.md", "PROGRESS.md", "skill.md", "scripts"})
 
     def test_removed_index_commands_and_apis_have_no_compatibility(self):
         for flag in ("--with-map", "--force-data"):
